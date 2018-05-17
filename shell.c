@@ -212,6 +212,7 @@ int main() {
             commandID++;
         }
         if (!strcmp(args[0], "exit")) {
+            freeArgs(args);
             return 0;
         } else if (!strcmp(args[0], "history")) {
             printHistory();
