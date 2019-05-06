@@ -16,39 +16,39 @@
 /**
  * Handler in the event of a heap allocation error.
  */
-void handleHeapError() {
+void handle_heap_error() {
     perror("Error --- out of heap space. Exiting...\n");
     exit(-1);
 }
 
 /**
  * Returns the number of tokens in the supplied string.
- * @param cmdLine the string to be tokenized
+ * @param cmd_line the string to be tokenized
  * @return The number of white-space separated tokens that were found in cmdLine.
  */
-int countTokens(const char *cmdLine) {
-    if (strlen(cmdLine) == 0)
+int count_tokens(const char *cmd_line) {
+    if (strlen(cmd_line) == 0)
         return 0;
 
-    int numTokens;
-    if (isspace(cmdLine[0]))
-        numTokens = 0;
+    int num_tokens;
+    if (isspace(cmd_line[0]))
+        num_tokens = 0;
     else
-        numTokens = 1;
+        num_tokens = 1;
 
     int i = 1;
-    while (cmdLine[i] != '\0') {
-        if ((!isspace(cmdLine[i])) && (isspace(cmdLine[i - 1])))
-            numTokens++;
+    while (cmd_line[i] != '\0') {
+        if ((!isspace(cmd_line[i])) && (isspace(cmd_line[i - 1])))
+            num_tokens++;
         i++;
     }
 
-    return numTokens;
+    return num_tokens;
 }
 
 /**
  * Returns the next token that can be read parsed from the supplied string.
- * @param cmdLine the string to be tokenized
+ * @param cmd_line the string to be tokenized
  * @param start the index position in cmdLine from which to start scanning
                for the next token
  * @return The ending index of the next token. Returns an END_OF_STRING special
@@ -57,71 +57,57 @@ int countTokens(const char *cmdLine) {
        white space characters need to be consumed, before the start of the
        next token.
  */
-int getNextToken(const char *cmdLine, int *start) {
+int get_next_token(const char *cmd_line, int *start) {
     int i = *start;
 
-    while ((cmdLine[i] != '\0') && (isspace(cmdLine[i]))) {
+    while ((cmd_line[i] != '\0') && (isspace(cmd_line[i]))) {
         i++;
     }
 
-    if (cmdLine[i] == '\0') // no more tokens
+    if (cmd_line[i] == '\0') // no more tokens
         return END_OF_STRING;
 
     *start = i;
-    while ((cmdLine[i] != '\0') && (!isspace(cmdLine[i])))
+    while ((cmd_line[i] != '\0') && (!isspace(cmd_line[i])))
         i++;
 
     return i;
 }
 
-/**
- * Returns an array of strings containing tokens extracted from the supplied
-   string.
-
- * @param cmdLine the string to be tokenized
- * @param background a pointer to a value that is set depending on whether the
-            supplied string describes a command to be executed in
-		    "background" mode, i.e., whether the last non-white space
-		    character in the command string is an &. If it is an &,
-		    then the command is to be run in background mode, and
-		    *background is set to 1; otherwise, it is set to 0.
- * @return A NULL-terminated array of char*s, where each char* points to a
-       string containing an extracted token.
- */
-char **parseCommand(const char *cmdLine, int *background) {
-    int numTokens = countTokens(cmdLine);
-    *background = 0;
-    char **args = (char **) malloc(sizeof(char *) * (numTokens + 1));
+char **parse_command(const char *cmd_line, int *bg) {
+    int num_tokens = count_tokens(cmd_line);
+    *bg = 0;
+    char **args = (char **) malloc(sizeof(char *) * (num_tokens + 1));
     if (!args)
-        handleHeapError();
+        handle_heap_error();
     int start = 0;
     int end;
-    int tokenLength;
-    for (int i = 0; i < numTokens; i++) {
-        end = getNextToken(cmdLine, &start);
-        tokenLength = end - start;
-        args[i] = (char *) malloc(sizeof(char) * (tokenLength + 1));
+    int token_length;
+    for (int i = 0; i < num_tokens; i++) {
+        end = get_next_token(cmd_line, &start);
+        token_length = end - start;
+        args[i] = (char *) malloc(sizeof(char) * (token_length + 1));
         if (!args[i])
-            handleHeapError();
-        strncpy(args[i], (cmdLine + start), tokenLength);
-        args[i][tokenLength] = '\0';
+            handle_heap_error();
+        strncpy(args[i], (cmd_line + start), token_length);
+        args[i][token_length] = '\0';
         start = end;
     }
 
-    if ((numTokens > 0) && (strcmp(args[numTokens - 1], "&") == 0)) {
-        *background = 1;
-        args = realloc(args, sizeof(char *) * numTokens);
-        numTokens--;
-    } else if (numTokens > 0) {
-        int length = strlen(args[numTokens - 1]);
-        if (args[numTokens - 1][length - 1] == '&') {
-            *background = 1;
-            args[numTokens - 1] = realloc(args[numTokens - 1], sizeof(char) * length);
-            args[numTokens - 1][length - 1] = '\0';
+    if ((num_tokens > 0) && (strcmp(args[num_tokens - 1], "&") == 0)) {
+        *bg = 1;
+        args = realloc(args, sizeof(char *) * num_tokens);
+        num_tokens--;
+    } else if (num_tokens > 0) {
+        int length = strlen(args[num_tokens - 1]);
+        if (args[num_tokens - 1][length - 1] == '&') {
+            *bg = 1;
+            args[num_tokens - 1] = realloc(args[num_tokens - 1], sizeof(char) * length);
+            args[num_tokens - 1][length - 1] = '\0';
         }
     }
 
-    args[numTokens] = NULL;
+    args[num_tokens] = NULL;
 
     return args;
 }

@@ -1,40 +1,103 @@
 /**
  * This program implements a shell.
  *
- * @authors Ryan Strauss
+ * The shell features the ability to run commands in the background and
+ * keeps a history of previous commands.
+ *
+ * @author Ryan Strauss
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <memory.h>
-#include "parser.h"
 #include <sys/wait.h>
 #include <unistd.h>
+
+#include "parser.h"
 
 #define MAX_CMD_LENGTH 1000
 #define HISTORY_SIZE 10
 
 typedef struct {
     char command[MAX_CMD_LENGTH];
-    int commandID;
-} history_t;
+    unsigned int command_id;
+} record_t;
 
 typedef struct {
-    history_t *bufferStart;
-    history_t *bufferEnd;
-    history_t *validStart;
-    history_t *validEnd;
-    history_t buffer[HISTORY_SIZE];
-    int size;
-} circular_buffer;
+    record_t buffer[HISTORY_SIZE];
+    unsigned int next_id, next_write;
+} history_t;
 
-circular_buffer history;
+history_t history;
 
 /**
- * Frees a 2D array from the heap.
+ * Resets the history buffer.
+ */
+void history_reset() {
+    history.next_write = 0;
+    history.next_id = 1;
+    for (int i = 0; i < HISTORY_SIZE; ++i)
+        history.buffer[i].command_id = 0;
+}
+
+/**
+ * Adds a new item to the history.
+ *
+ * @param command the command that is being added to the history
+ */
+void history_add(char command[MAX_CMD_LENGTH]) {
+    record_t *record = &history.buffer[history.next_write++];
+    record->command_id = history.next_id++;
+    strcpy(record->command, command);
+    if (history.next_write == HISTORY_SIZE)
+        history.next_write = 0;
+}
+
+/**
+ * Searches the history for a given command ID, and if a command with a matching ID is found, that command
+ * is copied to the provided destination.
+ *
+ * If a matching command is not found, an empty string is copied to the destination.
+ *
+ * @param command_id the command id to search for
+ * @param dest where the command will be copied to
+ */
+void history_lookup(int command_id, char *dest) {
+    int max = history.next_id - 1;
+    int min = max - HISTORY_SIZE + 1;
+
+    if (command_id < min || command_id > max) {
+        *dest = '\0';
+        return;
+    }
+
+    int index = ((history.next_write - 1) - (max - command_id) + HISTORY_SIZE) % HISTORY_SIZE;
+    strcpy(dest, history.buffer[index].command);
+}
+
+/**
+ * Prints the history to the console.
+ */
+void print_history() {
+    int oldest = history.next_write % HISTORY_SIZE;
+    int index = oldest;
+    while (index < oldest + HISTORY_SIZE) {
+        if (history.buffer[index % HISTORY_SIZE].command_id) {
+            printf("  %d  %s",
+                   history.buffer[index % HISTORY_SIZE].command_id,
+                   history.buffer[index % HISTORY_SIZE].command);
+        }
+        index++;
+    }
+}
+
+
+/**
+ * Frees a 2D char array from the heap.
+ *
  * @param args the array to be freed
  */
-void freeArgs(char **args) {
+void free_args(char **args) {
     int index = 0;
     while (args[index] != NULL) {
         free(args[index]);
@@ -44,187 +107,107 @@ void freeArgs(char **args) {
 }
 
 /**
- * Gets user input and stores in a string.
- * @param input the string where input will be stored
+ * Gets user input and stores in a char array.
+ *
+ * @param input the char array where the input will be stored
  */
-void getUserInput(char input[MAX_CMD_LENGTH]) {
-    char *returnValue = fgets(input, MAX_CMD_LENGTH, stdin);
-    if (returnValue != input) {
-        printf("Command can not be read.\n");
+void get_user_input(char *input) {
+    char *result = fgets(input, MAX_CMD_LENGTH, stdin);
+    if (result != input) {
+        printf("Command could not be read. Exiting...\n");
         fflush(stdout);
         exit(-2);
     }
 }
 
 /**
- * Executes the given command in the foreground.
- * @param args the arguments of the command to be executed
- */
-void executeForeground(char **args) {
-    pid_t pid = fork();
-    if (pid == -1) {
-        printf("Child process could not be created.\n");
-        fflush(stdout);
-        exit(-2);
-    }
-    if (!pid) {
-        if (execvp(args[0], args) == -1) {
-            printf("Execution failed.\n");
-            fflush(stdout);
-            exit(-2);
-        }
-    } else {
-        waitpid(pid, NULL, 0);
-    }
-}
-
-/**
- * Executes the given command in the background.
- * @param args the arguments of the command to be executed
- */
-void executeBackground(char **args) {
-    pid_t pid = fork();
-    if (pid == -1) {
-        printf("Child process could not be created.\n");
-        fflush(stdout);
-        exit(-2);
-    }
-    if (!pid) {
-        if (execvp(args[0], args) == -1) {
-            printf("Execution failed.\n");
-            fflush(stdout);
-            exit(-2);
-        }
-    }
-}
-
-/**
- * Handler to be used with SIGCHLD signals.
+ * Handler for SIGCHLD.
+ *
  * @param sig the signal
  */
-void handler(int sig) {
+void sigchild_handler(int sig) {
     while (waitpid(-1, NULL, WNOHANG) > 0);
 }
 
 /**
- * Adds the given history_t to history.
- * @param item the item to be added
+ * Executes the given command.
+ *
+ * @param args the arguments of the command to be executed
+ * @param background indicates whether or not the command should be executed in the background
  */
-void addToHistory(history_t item) {
-    if (history.size == 0) {
-        *history.validStart = item;
-    } else if (history.size < HISTORY_SIZE) {
-        history.validEnd++;
-        *history.validEnd = item;
-    } else {
-        *history.validStart = item;
-        history.validStart++;
-        history.validEnd++;
-        if (history.validStart > history.bufferEnd) {
-            history.validStart = history.bufferStart;
-        }
-        if (history.validEnd > history.bufferEnd) {
-            history.validEnd = history.bufferStart;
-        }
-    }
-    if (history.size < 10) {
-        history.size++;
-    }
-}
-
-/**
- * Prints the current history to the console.
- */
-void printHistory() {
-    history_t *pos = history.validStart;
-    for (int i = 0; i < history.size; ++i) {
-        printf("%d %s", pos->commandID, pos->command);
+void execute_command(char **args, int background) {
+    pid_t pid = fork();
+    if (pid == -1) {
+        printf("Child process could not be created.\n");
         fflush(stdout);
-        pos++;
-        if (pos > history.bufferEnd) {
-            pos = history.bufferStart;
+        exit(-2);
+    }
+    if (!pid) {
+        // This is the child process; we execute the command here
+        if (execvp(*args, args) == -1) {
+            printf("Could not execute command.\n");
+            fflush(stdout);
+            exit(-2);
         }
+    } else if (!background) {
+        // This is the parent process; if not running the command in the background, we wait for it to finish
+        waitpid(pid, NULL, 0);
     }
 }
 
-/**
- * Executes the given command from the history.
- * @param commandID the ID of the command to execute
- * @param cmdID the current command ID
- */
-void historyExpansion(int commandID, int *cmdID) {
-    int background;
-    for (int i = 0; i < history.size; ++i) {
-        if (history.buffer[i].commandID == commandID) {
-            char **args = parseCommand(history.buffer[i].command, &background);
-            if (strcmp(history.buffer[i].command, "")) {
-                history_t newItem;
-                strcpy(newItem.command, history.buffer[i].command);
-                newItem.commandID = *cmdID;
-                addToHistory(newItem);
-            }
-            if (!strcmp(args[0], "exit")) {
-                freeArgs(args);
-                exit(0);
-            } else if (!strcmp(args[0], "history")) {
-                printHistory();
-            } else if (!background) {
-                executeForeground(args);
-            } else {
-                executeBackground(args);
-            }
-            freeArgs(args);
-            (*cmdID)++;
-            return;
-        }
-    }
-    printf("Event not found.\n");
-    fflush(stdout);
-}
-
-/**
- * Implements helper functions to run the shell.
- * @return 0 if program exits normally
- */
 int main() {
-    signal(SIGCHLD, handler);
-    history.bufferStart = history.buffer;
-    history.bufferEnd = history.bufferStart + HISTORY_SIZE - 1;
-    history.validStart = history.bufferStart;
-    history.validEnd = history.bufferStart;
-    history.size = 0;
-    int commandID = 1;
+    // Register handler for SIGCHLD signals
+    signal(SIGCHLD, sigchild_handler);
+
+    // Initialize the history
+    history_reset();
+
+    char user_input[MAX_CMD_LENGTH];
+    int background;
+    char **args;
+
     while (1) {
-        char input[MAX_CMD_LENGTH];
-        int background;
+        // Print the prompt
         printf("catshell> ");
         fflush(stdout);
-        getUserInput(input);
-        char **args = parseCommand(input, &background);
-        if (args[0] == NULL) {
+
+        // Get user input and parse it
+        get_user_input(user_input);
+
+        // Ignore blank input
+        if (*user_input == '\0')
             continue;
+
+        // Check for command in history
+        if (*user_input == '!') {
+            history_lookup(atoi(user_input + 1), user_input);
+            if (*user_input == '\0') {
+                printf("Event not found.\n");
+                fflush(stdout);
+                continue;
+            }
         }
-        if (input[0] != '!') {
-            history_t newItem;
-            strcpy(newItem.command, input);
-            newItem.commandID = commandID;
-            addToHistory(newItem);
-            commandID++;
+
+        // Parse the command
+        args = parse_command(user_input, &background);
+
+        // Check for exit command
+        if (!strcmp(*args, "exit")) {
+            free_args(args);
+            break;
         }
-        if (!strcmp(args[0], "exit")) {
-            freeArgs(args);
-            return 0;
-        } else if (!strcmp(args[0], "history")) {
-            printHistory();
-        } else if (input[0] == '!') {
-            char id[5];
-            strcpy(id, args[0] + 1);
-            historyExpansion(atoi(id), &commandID);
-        } else if (!background) {
-            executeForeground(args);
+        // Check for history command
+        if (!strcmp(*args, "history")) {
+            history_add(user_input);
+            print_history();
         } else {
-            executeBackground(args);
+            // Add the command to the history then fork a child and execute it
+            history_add(user_input);
+            execute_command(args, background);
         }
-        freeArgs(args);
+        // Free the arguments from the heap
+        free_args(args);
     }
+
+    return EXIT_SUCCESS;
 }
