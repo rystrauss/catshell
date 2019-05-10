@@ -36,8 +36,10 @@ history_t history;
 void history_reset() {
     history.next_write = 0;
     history.next_id = 1;
-    for (int i = 0; i < HISTORY_SIZE; ++i)
+    for (int i = 0; i < HISTORY_SIZE; ++i) {
+        // A command ID of 0 is used to signify an "empty" record
         history.buffer[i].command_id = 0;
+    }
 }
 
 /**
@@ -62,11 +64,13 @@ void history_add(char command[MAX_CMD_LENGTH]) {
  * @param command_id the command id to search for
  * @param dest where the command will be copied to
  */
-void history_lookup(int command_id, char *dest) {
-    int max = history.next_id - 1;
-    int min = max - HISTORY_SIZE + 1;
+void history_lookup(unsigned int command_id, char *dest) {
+    unsigned int max = history.next_id - 1;
+    // We have to make sure that min does not overflow, since it is an unsigned int
+    unsigned int min = (max >= HISTORY_SIZE) ? max - HISTORY_SIZE + 1 : 0;
 
     if (command_id < min || command_id > max) {
+        // Setting dest to an empty string signals that the command ID was not found in the history
         *dest = '\0';
         return;
     }
@@ -112,11 +116,9 @@ void free_args(char **args) {
  * @param input the char array where the input will be stored
  */
 void get_user_input(char *input) {
-    char *result = fgets(input, MAX_CMD_LENGTH, stdin);
-    if (result != input) {
-        printf("Command could not be read. Exiting...\n");
+    if (fgets(input, MAX_CMD_LENGTH, stdin) == NULL) {
+        printf("Error reading user input.\n");
         fflush(stdout);
-        exit(-2);
     }
 }
 
@@ -140,14 +142,14 @@ void execute_command(char **args, int background) {
     if (pid == -1) {
         printf("Child process could not be created.\n");
         fflush(stdout);
-        exit(-2);
+        free_args(args);
+        exit(EXIT_FAILURE);
     }
     if (!pid) {
         // This is the child process; we execute the command here
         if (execvp(*args, args) == -1) {
-            printf("Could not execute command.\n");
+            printf("%s: command could not be executed\n", *args);
             fflush(stdout);
-            exit(-2);
         }
     } else if (!background) {
         // This is the parent process; if not running the command in the background, we wait for it to finish
@@ -182,7 +184,7 @@ int main() {
         if (*user_input == '!') {
             history_lookup(atoi(user_input + 1), user_input);
             if (*user_input == '\0') {
-                printf("Event not found.\n");
+                printf("Command not found in history.\n");
                 fflush(stdout);
                 continue;
             }
